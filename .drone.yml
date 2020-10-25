@@ -1,6 +1,10 @@
 ---
 kind: pipeline
 name: testing
+trigger:
+  event:
+    - push
+    - pull_request
 
 steps:
 - name: test
