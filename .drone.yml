@@ -29,6 +29,7 @@ steps:
   commands:
   - go build -mod=vendor -ldflags="-s -w -X 'main.Version=${DRONE_TAG}'" -o bin/reverse-${DRONE_TAG}-linux-amd64
   - GOOS=windows GOARCH=amd64 go build -mod=vendor -ldflags="-s -w -X 'main.Version=${DRONE_TAG}'" -o bin/reverse-${DRONE_TAG}-windows-amd64.exe
+  - GOOS=darwin GOARCH=amd64 go build -mod=vendor -ldflags="-s -w -X 'main.Version=${DRONE_TAG}'" -o bin/reverse-${DRONE_TAG}-darwin-amd64
   environment:
     GO111MODULE: on
 
