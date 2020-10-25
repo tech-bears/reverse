@@ -1,11 +1,40 @@
+---
 kind: pipeline
-name: default
+name: testing
 
 steps:
 - name: test
-  image: golang:1.13
-  environment:
-      GOPROXY: https://goproxy.cn
+  image: golang:1.15
   commands:
   - go build -mod=vendor
   - go test -mod=vendor -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+
+---
+kind: pipeline
+name: release-tag
+trigger:
+  event:
+    - tag
+depends_on:
+  - testing
+
+steps:
+- name: release-build
+  pull: always
+  image: golang:1.15
+  commands:
+  - go build -mod=vendor -ldflags="-s -w -X 'main.Version=${DRONE_TAG}'" -o bin/reverse-${DRONE_TAG}-linux-amd64
+  - GOOS=windows GOARCH=amd64 go build -mod=vendor -ldflags="-s -w -X 'main.Version=${DRONE_TAG}'" -o bin/reverse-${DRONE_TAG}-windows-amd64.exe
+  environment:
+    GO111MODULE: on
+
+- name: release-tag-gitea
+  pull: always
+  image: plugins/gitea-release:latest
+  settings:
+    base_url: https://gitea.com
+    files:
+    - "bin/*"
+  environment:
+    GITEA_TOKEN:
+      from_secret: gitea_token
