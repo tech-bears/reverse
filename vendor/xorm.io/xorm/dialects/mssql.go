@@ -205,16 +205,50 @@ var (
 		"PROC":                           true,
 	}
 
-	mssqlQuoter = schemas.Quoter{'[', ']', schemas.AlwaysReserve}
+	mssqlQuoter = schemas.Quoter{
+		Prefix:     '[',
+		Suffix:     ']',
+		IsReserved: schemas.AlwaysReserve,
+	}
 )
 
 type mssql struct {
 	Base
+	defaultVarchar string
+	defaultChar    string
 }
 
-func (db *mssql) Init(d *core.DB, uri *URI) error {
+func (db *mssql) Init(uri *URI) error {
 	db.quoter = mssqlQuoter
-	return db.Base.Init(d, db, uri)
+	return db.Base.Init(db, uri)
+}
+
+func (db *mssql) SetParams(params map[string]string) {
+	defaultVarchar, ok := params["DEFAULT_VARCHAR"]
+	if ok {
+		var t = strings.ToUpper(defaultVarchar)
+		switch t {
+		case "NVARCHAR", "VARCHAR":
+			db.defaultVarchar = t
+		default:
+			db.defaultVarchar = "VARCHAR"
+		}
+	} else {
+		db.defaultVarchar = "VARCHAR"
+	}
+
+	defaultChar, ok := params["DEFAULT_CHAR"]
+	if ok {
+		var t = strings.ToUpper(defaultChar)
+		switch t {
+		case "NCHAR", "CHAR":
+			db.defaultChar = t
+		default:
+			db.defaultChar = "CHAR"
+		}
+	} else {
+		db.defaultChar = "CHAR"
+	}
 }
 
 func (db *mssql) SQLType(c *schemas.Column) string {
@@ -227,6 +261,7 @@ func (db *mssql) SQLType(c *schemas.Column) string {
 		} else if strings.EqualFold(c.Default, "false") {
 			c.Default = "0"
 		}
+		return res
 	case schemas.Serial:
 		c.IsAutoIncrement = true
 		c.IsPrimaryKey = true
@@ -250,7 +285,7 @@ func (db *mssql) SQLType(c *schemas.Column) string {
 	case schemas.MediumInt:
 		res = schemas.Int
 	case schemas.Text, schemas.MediumText, schemas.TinyText, schemas.LongText, schemas.Json:
-		res = schemas.Varchar + "(MAX)"
+		res = db.defaultVarchar + "(MAX)"
 	case schemas.Double:
 		res = schemas.Real
 	case schemas.Uuid:
@@ -262,12 +297,32 @@ func (db *mssql) SQLType(c *schemas.Column) string {
 	case schemas.BigInt:
 		res = schemas.BigInt
 		c.Length = 0
+	case schemas.NVarchar:
+		res = t
+		if c.Length == -1 {
+			res += "(MAX)"
+		}
+	case schemas.Varchar:
+		res = db.defaultVarchar
+		if c.Length == -1 {
+			res += "(MAX)"
+		}
+	case schemas.Char:
+		res = db.defaultChar
+		if c.Length == -1 {
+			res += "(MAX)"
+		}
+	case schemas.NChar:
+		res = t
+		if c.Length == -1 {
+			res += "(MAX)"
+		}
 	default:
 		res = t
 	}
 
-	if res == schemas.Int {
-		return schemas.Int
+	if res == schemas.Int || res == schemas.Bit || res == schemas.DateTime {
+		return res
 	}
 
 	hasLen1 := (c.Length > 0)
@@ -319,18 +374,18 @@ func (db *mssql) IndexCheckSQL(tableName, idxName string) (string, []interface{}
 	return sql, args
 }
 
-func (db *mssql) IsColumnExist(ctx context.Context, tableName, colName string) (bool, error) {
+func (db *mssql) IsColumnExist(queryer core.Queryer, ctx context.Context, tableName, colName string) (bool, error) {
 	query := `SELECT "COLUMN_NAME" FROM "INFORMATION_SCHEMA"."COLUMNS" WHERE "TABLE_NAME" = ? AND "COLUMN_NAME" = ?`
 
-	return db.HasRecords(ctx, query, tableName, colName)
+	return db.HasRecords(queryer, ctx, query, tableName, colName)
 }
 
-func (db *mssql) IsTableExist(ctx context.Context, tableName string) (bool, error) {
+func (db *mssql) IsTableExist(queryer core.Queryer, ctx context.Context, tableName string) (bool, error) {
 	sql := "select * from sysobjects where id = object_id(N'" + tableName + "') and OBJECTPROPERTY(id, N'IsUserTable') = 1"
-	return db.HasRecords(ctx, sql)
+	return db.HasRecords(queryer, ctx, sql)
 }
 
-func (db *mssql) GetColumns(ctx context.Context, tableName string) ([]string, map[string]*schemas.Column, error) {
+func (db *mssql) GetColumns(queryer core.Queryer, ctx context.Context, tableName string) ([]string, map[string]*schemas.Column, error) {
 	args := []interface{}{}
 	s := `select a.name as name, b.name as ctype,a.max_length,a.precision,a.scale,a.is_nullable as nullable,
 		  "default_is_null" = (CASE WHEN c.text is null THEN 1 ELSE 0 END),
@@ -346,7 +401,7 @@ func (db *mssql) GetColumns(ctx context.Context, tableName string) ([]string, ma
 		) as p on p.object_id = a.object_id AND p.column_id = a.column_id
           where a.object_id=object_id('` + tableName + `')`
 
-	rows, err := db.DB().QueryContext(ctx, s, args...)
+	rows, err := queryer.QueryContext(ctx, s, args...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -385,8 +440,18 @@ func (db *mssql) GetColumns(ctx context.Context, tableName string) ([]string, ma
 			col.SQLType = schemas.SQLType{Name: schemas.TimeStampz, DefaultLength: 0, DefaultLength2: 0}
 		case "NVARCHAR":
 			col.SQLType = schemas.SQLType{Name: schemas.NVarchar, DefaultLength: 0, DefaultLength2: 0}
+			if col.Length > 0 {
+				col.Length /= 2
+				col.Length2 /= 2
+			}
 		case "IMAGE":
 			col.SQLType = schemas.SQLType{Name: schemas.VarBinary, DefaultLength: 0, DefaultLength2: 0}
+		case "NCHAR":
+			if col.Length > 0 {
+				col.Length /= 2
+				col.Length2 /= 2
+			}
+			fallthrough
 		default:
 			if _, ok := schemas.SqlTypes[ct]; ok {
 				col.SQLType = schemas.SQLType{Name: ct, DefaultLength: 0, DefaultLength2: 0}
@@ -401,11 +466,11 @@ func (db *mssql) GetColumns(ctx context.Context, tableName string) ([]string, ma
 	return colSeq, cols, nil
 }
 
-func (db *mssql) GetTables(ctx context.Context) ([]*schemas.Table, error) {
+func (db *mssql) GetTables(queryer core.Queryer, ctx context.Context) ([]*schemas.Table, error) {
 	args := []interface{}{}
 	s := `select name from sysobjects where xtype ='U'`
 
-	rows, err := db.DB().QueryContext(ctx, s, args...)
+	rows, err := queryer.QueryContext(ctx, s, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -425,7 +490,7 @@ func (db *mssql) GetTables(ctx context.Context) ([]*schemas.Table, error) {
 	return tables, nil
 }
 
-func (db *mssql) GetIndexes(ctx context.Context, tableName string) (map[string]*schemas.Index, error) {
+func (db *mssql) GetIndexes(queryer core.Queryer, ctx context.Context, tableName string) (map[string]*schemas.Index, error) {
 	args := []interface{}{tableName}
 	s := `SELECT
 IXS.NAME                    AS  [INDEX_NAME],
@@ -439,7 +504,7 @@ AND IXCS.COLUMN_ID=C.COLUMN_ID
 WHERE IXS.TYPE_DESC='NONCLUSTERED' and OBJECT_NAME(IXS.OBJECT_ID) =?
 `
 
-	rows, err := db.DB().QueryContext(ctx, s, args...)
+	rows, err := queryer.QueryContext(ctx, s, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -501,11 +566,8 @@ func (db *mssql) CreateTableSQL(table *schemas.Table, tableName string) ([]strin
 
 	for _, colName := range table.ColumnsSeq() {
 		col := table.GetColumn(colName)
-		if col.IsPrimaryKey && len(pkList) == 1 {
-			sql += db.String(col)
-		} else {
-			sql += db.StringNoPk(col)
-		}
+		s, _ := ColumnString(db, col, col.IsPrimaryKey && len(pkList) == 1)
+		sql += s
 		sql = strings.TrimSpace(sql)
 		sql += ", "
 	}

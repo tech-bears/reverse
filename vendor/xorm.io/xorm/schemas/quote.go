@@ -82,9 +82,7 @@ func (q Quoter) JoinWrite(b *strings.Builder, a []string, sep string) error {
 				return err
 			}
 		}
-		if s != "*" {
-			q.QuoteTo(b, strings.TrimSpace(s))
-		}
+		q.QuoteTo(b, strings.TrimSpace(s))
 	}
 	return nil
 }
@@ -107,16 +105,17 @@ func findStart(value string, start int) int {
 		return start
 	}
 
-	var k int
+	var k = -1
 	for j := start; j < len(value); j++ {
 		if value[j] != ' ' {
 			k = j
 			break
 		}
 	}
-	if k-1 == len(value) {
+	if k == -1 {
 		return len(value)
 	}
+
 	if (value[k] == 'A' || value[k] == 'a') && (value[k+1] == 'S' || value[k+1] == 's') {
 		k = k + 2
 	}
@@ -142,7 +141,7 @@ func (q Quoter) quoteWordTo(buf *strings.Builder, word string) error {
 	}
 
 	isReserved := q.IsReserved(realWord)
-	if isReserved {
+	if isReserved && realWord != "*" {
 		if err := buf.WriteByte(q.Prefix); err != nil {
 			return err
 		}
@@ -150,7 +149,7 @@ func (q Quoter) quoteWordTo(buf *strings.Builder, word string) error {
 	if _, err := buf.WriteString(realWord); err != nil {
 		return err
 	}
-	if isReserved {
+	if isReserved && realWord != "*" {
 		return buf.WriteByte(q.Suffix)
 	}
 
@@ -178,8 +177,11 @@ func (q Quoter) QuoteTo(buf *strings.Builder, value string) error {
 				return err
 			}
 		}
-		var nextEnd = findWord(value, start)
+		if start == len(value) {
+			return nil
+		}
 
+		var nextEnd = findWord(value, start)
 		if err := q.quoteWordTo(buf, value[start:nextEnd]); err != nil {
 			return err
 		}

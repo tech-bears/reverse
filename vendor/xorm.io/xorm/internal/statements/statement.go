@@ -797,8 +797,7 @@ func (statement *Statement) buildConds2(table *schemas.Table, bean interface{},
 			if !requiredField && fieldValue.Uint() == 0 {
 				continue
 			}
-			t := int64(fieldValue.Uint())
-			val = reflect.ValueOf(&t).Interface()
+			val = fieldValue.Interface()
 		case reflect.Struct:
 			if fieldType.ConvertibleTo(schemas.TimeType) {
 				t := fieldValue.Convert(schemas.TimeType).Interface().(time.Time)
@@ -903,7 +902,7 @@ func (statement *Statement) BuildConds(table *schemas.Table, bean interface{}, i
 }
 
 func (statement *Statement) mergeConds(bean interface{}) error {
-	if !statement.NoAutoCondition {
+	if !statement.NoAutoCondition && statement.RefTable != nil {
 		var addedTableName = (len(statement.JoinStr) > 0)
 		autoCond, err := statement.BuildConds(statement.RefTable, bean, true, true, false, true, addedTableName)
 		if err != nil {

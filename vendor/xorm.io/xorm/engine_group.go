@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"xorm.io/xorm/caches"
+	"xorm.io/xorm/contexts"
 	"xorm.io/xorm/dialects"
 	"xorm.io/xorm/log"
 	"xorm.io/xorm/names"
@@ -78,7 +79,7 @@ func (eg *EngineGroup) Close() error {
 	return nil
 }
 
-// Context returned a group session
+// ContextHook returned a group session
 func (eg *EngineGroup) Context(ctx context.Context) *Session {
 	sess := eg.NewSession()
 	sess.isAutoClose = true
@@ -143,6 +144,13 @@ func (eg *EngineGroup) SetLogger(logger interface{}) {
 	}
 }
 
+func (eg *EngineGroup) AddHook(hook contexts.Hook) {
+	eg.Engine.AddHook(hook)
+	for i := 0; i < len(eg.slaves); i++ {
+		eg.slaves[i].AddHook(hook)
+	}
+}
+
 // SetLogLevel sets the logger level
 func (eg *EngineGroup) SetLogLevel(level log.LogLevel) {
 	eg.Engine.SetLogLevel(level)
@@ -161,17 +169,17 @@ func (eg *EngineGroup) SetMapper(mapper names.Mapper) {
 
 // SetMaxIdleConns set the max idle connections on pool, default is 2
 func (eg *EngineGroup) SetMaxIdleConns(conns int) {
-	eg.Engine.dialect.DB().SetMaxIdleConns(conns)
+	eg.Engine.DB().SetMaxIdleConns(conns)
 	for i := 0; i < len(eg.slaves); i++ {
-		eg.slaves[i].dialect.DB().SetMaxIdleConns(conns)
+		eg.slaves[i].DB().SetMaxIdleConns(conns)
 	}
 }
 
 // SetMaxOpenConns is only available for go 1.2+
 func (eg *EngineGroup) SetMaxOpenConns(conns int) {
-	eg.Engine.dialect.DB().SetMaxOpenConns(conns)
+	eg.Engine.DB().SetMaxOpenConns(conns)
 	for i := 0; i < len(eg.slaves); i++ {
-		eg.slaves[i].dialect.DB().SetMaxOpenConns(conns)
+		eg.slaves[i].DB().SetMaxOpenConns(conns)
 	}
 }
 
@@ -181,6 +189,7 @@ func (eg *EngineGroup) SetPolicy(policy GroupPolicy) *EngineGroup {
 	return eg
 }
 
+// SetQuotePolicy sets the special quote policy
 func (eg *EngineGroup) SetQuotePolicy(quotePolicy dialects.QuotePolicy) {
 	eg.Engine.SetQuotePolicy(quotePolicy)
 	for i := 0; i < len(eg.slaves); i++ {

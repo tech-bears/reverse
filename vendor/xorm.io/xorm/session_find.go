@@ -11,6 +11,7 @@ import (
 
 	"xorm.io/builder"
 	"xorm.io/xorm/caches"
+	"xorm.io/xorm/internal/statements"
 	"xorm.io/xorm/internal/utils"
 	"xorm.io/xorm/schemas"
 )
@@ -59,8 +60,15 @@ func (session *Session) FindAndCount(rowsSlicePtr interface{}, condiBean ...inte
 	if session.statement.OrderStr != "" {
 		session.statement.OrderStr = ""
 	}
+	if session.statement.LimitN != nil {
+		session.statement.LimitN = nil
+	}
+	if session.statement.Start > 0 {
+		session.statement.Start = 0
+	}
 
-	return session.Count(reflect.New(sliceElementType).Interface())
+	// session has stored the conditions so we use `unscoped` to avoid duplicated condition.
+	return session.Unscoped().Count(reflect.New(sliceElementType).Interface())
 }
 
 func (session *Session) find(rowsSlicePtr interface{}, condiBean ...interface{}) error {
@@ -106,8 +114,11 @@ func (session *Session) find(rowsSlicePtr interface{}, condiBean ...interface{})
 	)
 	if tp == tpStruct {
 		if !session.statement.NoAutoCondition && len(condiBean) > 0 {
-			var err error
-			autoCond, err = session.statement.BuildConds(table, condiBean[0], true, true, false, true, addedTableName)
+			condTable, err := session.engine.tagParser.Parse(reflect.ValueOf(condiBean[0]))
+			if err != nil {
+				return err
+			}
+			autoCond, err = session.statement.BuildConds(condTable, condiBean[0], true, true, false, true, addedTableName)
 			if err != nil {
 				return err
 			}
@@ -315,7 +326,7 @@ func (session *Session) cacheFind(t reflect.Type, sqlStr string, rowsSlicePtr in
 			}
 			var pk schemas.PK = make([]interface{}, len(table.PrimaryKeys))
 			for i, col := range table.PKColumns() {
-				pk[i], err = session.engine.idTypeAssertion(col, res[i])
+				pk[i], err = col.ConvertID(res[i])
 				if err != nil {
 					return err
 				}
@@ -365,7 +376,7 @@ func (session *Session) cacheFind(t reflect.Type, sqlStr string, rowsSlicePtr in
 		} else {
 			session.engine.logger.Debugf("[cache] cache hit bean: %v, %v, %v", tableName, id, bean)
 
-			pk, err := session.engine.IDOf(bean)
+			pk, err := table.IDOfV(reflect.ValueOf(bean))
 			if err != nil {
 				return err
 			}
@@ -387,6 +398,12 @@ func (session *Session) cacheFind(t reflect.Type, sqlStr string, rowsSlicePtr in
 		slices := reflect.New(reflect.SliceOf(t))
 		beans := slices.Interface()
 
+		statement := session.statement
+		session.statement = statements.NewStatement(
+			session.engine.dialect,
+			session.engine.tagParser,
+			session.engine.DatabaseTZ,
+		)
 		if len(table.PrimaryKeys) == 1 {
 			ff := make([]interface{}, 0, len(ides))
 			for _, ie := range ides {
@@ -408,6 +425,7 @@ func (session *Session) cacheFind(t reflect.Type, sqlStr string, rowsSlicePtr in
 		if err != nil {
 			return err
 		}
+		session.statement = statement
 
 		vs := reflect.Indirect(reflect.ValueOf(beans))
 		for i := 0; i < vs.Len(); i++ {
@@ -415,7 +433,7 @@ func (session *Session) cacheFind(t reflect.Type, sqlStr string, rowsSlicePtr in
 			if rv.Kind() != reflect.Ptr {
 				rv = rv.Addr()
 			}
-			id, err := session.engine.idOfV(rv)
+			id, err := table.IDOfV(rv)
 			if err != nil {
 				return err
 			}

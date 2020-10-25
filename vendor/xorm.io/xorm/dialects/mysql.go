@@ -162,7 +162,11 @@ var (
 		"ZEROFILL":     true,
 	}
 
-	mysqlQuoter = schemas.Quoter{'`', '`', schemas.AlwaysReserve}
+	mysqlQuoter = schemas.Quoter{
+		Prefix:     '`',
+		Suffix:     '`',
+		IsReserved: schemas.AlwaysReserve,
+	}
 )
 
 type mysql struct {
@@ -179,9 +183,9 @@ type mysql struct {
 	rowFormat         string
 }
 
-func (db *mysql) Init(d *core.DB, uri *URI) error {
+func (db *mysql) Init(uri *URI) error {
 	db.quoter = mysqlQuoter
-	return db.Base.Init(d, db, uri)
+	return db.Base.Init(db, uri)
 }
 
 func (db *mysql) SetParams(params map[string]string) {
@@ -286,27 +290,36 @@ func (db *mysql) IndexCheckSQL(tableName, idxName string) (string, []interface{}
 	return sql, args
 }
 
-func (db *mysql) IsTableExist(ctx context.Context, tableName string) (bool, error) {
+func (db *mysql) IsTableExist(queryer core.Queryer, ctx context.Context, tableName string) (bool, error) {
 	sql := "SELECT `TABLE_NAME` from `INFORMATION_SCHEMA`.`TABLES` WHERE `TABLE_SCHEMA`=? and `TABLE_NAME`=?"
-	return db.HasRecords(ctx, sql, db.uri.DBName, tableName)
+	return db.HasRecords(queryer, ctx, sql, db.uri.DBName, tableName)
 }
 
 func (db *mysql) AddColumnSQL(tableName string, col *schemas.Column) string {
 	quoter := db.dialect.Quoter()
-	sql := fmt.Sprintf("ALTER TABLE %v ADD %v", quoter.Quote(tableName),
-		db.String(col))
+	s, _ := ColumnString(db, col, true)
+	sql := fmt.Sprintf("ALTER TABLE %v ADD %v", quoter.Quote(tableName), s)
 	if len(col.Comment) > 0 {
 		sql += " COMMENT '" + col.Comment + "'"
 	}
 	return sql
 }
 
-func (db *mysql) GetColumns(ctx context.Context, tableName string) ([]string, map[string]*schemas.Column, error) {
+func (db *mysql) GetColumns(queryer core.Queryer, ctx context.Context, tableName string) ([]string, map[string]*schemas.Column, error) {
 	args := []interface{}{db.uri.DBName, tableName}
+	alreadyQuoted := "(INSTR(VERSION(), 'maria') > 0 && " +
+		"(SUBSTRING_INDEX(VERSION(), '.', 1) > 10 || " +
+		"(SUBSTRING_INDEX(VERSION(), '.', 1) = 10 && " +
+		"(SUBSTRING_INDEX(SUBSTRING(VERSION(), 4), '.', 1) > 2 || " +
+		"(SUBSTRING_INDEX(SUBSTRING(VERSION(), 4), '.', 1) = 2 && " +
+		"SUBSTRING_INDEX(SUBSTRING(VERSION(), 6), '-', 1) >= 7)))))"
 	s := "SELECT `COLUMN_NAME`, `IS_NULLABLE`, `COLUMN_DEFAULT`, `COLUMN_TYPE`," +
-		" `COLUMN_KEY`, `EXTRA`,`COLUMN_COMMENT` FROM `INFORMATION_SCHEMA`.`COLUMNS` WHERE `TABLE_SCHEMA` = ? AND `TABLE_NAME` = ?"
+		" `COLUMN_KEY`, `EXTRA`, `COLUMN_COMMENT`, " +
+		alreadyQuoted + " AS NEEDS_QUOTE " +
+		"FROM `INFORMATION_SCHEMA`.`COLUMNS` WHERE `TABLE_SCHEMA` = ? AND `TABLE_NAME` = ?" +
+		" ORDER BY `COLUMNS`.ORDINAL_POSITION"
 
-	rows, err := db.DB().QueryContext(ctx, s, args...)
+	rows, err := queryer.QueryContext(ctx, s, args...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -319,8 +332,9 @@ func (db *mysql) GetColumns(ctx context.Context, tableName string) ([]string, ma
 		col.Indexes = make(map[string]int)
 
 		var columnName, isNullable, colType, colKey, extra, comment string
+		var alreadyQuoted bool
 		var colDefault *string
-		err = rows.Scan(&columnName, &isNullable, &colDefault, &colType, &colKey, &extra, &comment)
+		err = rows.Scan(&columnName, &isNullable, &colDefault, &colType, &colKey, &extra, &comment, &alreadyQuoted)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -330,7 +344,7 @@ func (db *mysql) GetColumns(ctx context.Context, tableName string) ([]string, ma
 			col.Nullable = true
 		}
 
-		if colDefault != nil {
+		if colDefault != nil && (!alreadyQuoted || *colDefault != "NULL") {
 			col.Default = *colDefault
 			col.DefaultIsEmpty = false
 		} else {
@@ -399,9 +413,9 @@ func (db *mysql) GetColumns(ctx context.Context, tableName string) ([]string, ma
 		}
 
 		if !col.DefaultIsEmpty {
-			if col.SQLType.IsText() {
+			if !alreadyQuoted && col.SQLType.IsText() {
 				col.Default = "'" + col.Default + "'"
-			} else if col.SQLType.IsTime() && col.Default != "CURRENT_TIMESTAMP" {
+			} else if col.SQLType.IsTime() && !alreadyQuoted && col.Default != "CURRENT_TIMESTAMP" {
 				col.Default = "'" + col.Default + "'"
 			}
 		}
@@ -411,12 +425,12 @@ func (db *mysql) GetColumns(ctx context.Context, tableName string) ([]string, ma
 	return colSeq, cols, nil
 }
 
-func (db *mysql) GetTables(ctx context.Context) ([]*schemas.Table, error) {
+func (db *mysql) GetTables(queryer core.Queryer, ctx context.Context) ([]*schemas.Table, error) {
 	args := []interface{}{db.uri.DBName}
 	s := "SELECT `TABLE_NAME`, `ENGINE`, `AUTO_INCREMENT`, `TABLE_COMMENT` from " +
 		"`INFORMATION_SCHEMA`.`TABLES` WHERE `TABLE_SCHEMA`=? AND (`ENGINE`='MyISAM' OR `ENGINE` = 'InnoDB' OR `ENGINE` = 'TokuDB')"
 
-	rows, err := db.DB().QueryContext(ctx, s, args...)
+	rows, err := queryer.QueryContext(ctx, s, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -459,11 +473,11 @@ func (db *mysql) SetQuotePolicy(quotePolicy QuotePolicy) {
 	}
 }
 
-func (db *mysql) GetIndexes(ctx context.Context, tableName string) (map[string]*schemas.Index, error) {
+func (db *mysql) GetIndexes(queryer core.Queryer, ctx context.Context, tableName string) (map[string]*schemas.Index, error) {
 	args := []interface{}{db.uri.DBName, tableName}
 	s := "SELECT `INDEX_NAME`, `NON_UNIQUE`, `COLUMN_NAME` FROM `INFORMATION_SCHEMA`.`STATISTICS` WHERE `TABLE_SCHEMA` = ? AND `TABLE_NAME` = ?"
 
-	rows, err := db.DB().QueryContext(ctx, s, args...)
+	rows, err := queryer.QueryContext(ctx, s, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -525,11 +539,8 @@ func (db *mysql) CreateTableSQL(table *schemas.Table, tableName string) ([]strin
 
 		for _, colName := range table.ColumnsSeq() {
 			col := table.GetColumn(colName)
-			if col.IsPrimaryKey && len(pkList) == 1 {
-				sql += db.String(col)
-			} else {
-				sql += db.StringNoPk(col)
-			}
+			s, _ := ColumnString(db, col, col.IsPrimaryKey && len(pkList) == 1)
+			sql += s
 			sql = strings.TrimSpace(sql)
 			if len(col.Comment) > 0 {
 				sql += " COMMENT '" + col.Comment + "'"
