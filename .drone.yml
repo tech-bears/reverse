@@ -34,7 +34,7 @@ steps:
 
 - name: release-tag-gitea
   pull: always
-  image: plugins/gitea-release:1
+  image: plugins/gitea-release:latest
   settings:
     files:
     - "bin/*"
