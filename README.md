@@ -54,6 +54,7 @@ targets:
   column_mapper: snake # how column name map to class or struct field name
   table_prefix: "" # table prefix
   multiple_files: true # generate multiple files or one
+  language: golang
   template: | # template for code file, it has higher perior than template_path
     package models
 
@@ -85,6 +86,11 @@ targets:
 - *Upper*: Convert word to all upper.
 - *TableMapper*: Mapper method to convert table name to class/struct name.
 - *ColumnMapper*: Mapper method to convert column name to class/struct field name.
+
+## Golang Template Funcs
+
+- *Type*: return column's golang type
+- *Tag*: return golang struct tag for column
 
 ## Template Vars
 

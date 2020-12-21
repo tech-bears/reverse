@@ -54,6 +54,7 @@ targets:
   column_mapper: snake # 字段名到代码或结构体成员的映射关系
   table_prefix: "" # 表前缀
   multiple_files: true # 是否生成多个文件
+  language: golang
   template: | # 生成模板，如果这里定义了，优先级比 template_path 高
     package models
 
@@ -81,6 +82,11 @@ targets:
 - *Upper*: 将单词转为全部大写。
 - *TableMapper*: 将表名转为结构体名的映射函数。
 - *ColumnMapper*: 将字段名转为结构体成员名的函数。
+
+## Go 语言模版函数
+
+- *Type*: 返回Go语言的类型
+- *Tag*: 返回Go语言的Tag信息
 
 ## 模板变量
 
