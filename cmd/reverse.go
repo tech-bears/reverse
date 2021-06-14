@@ -8,163 +8,88 @@ import (
 	"bytes"
 	"errors"
 	"html/template"
-	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"xorm.io/reverse/language"
+	"xorm.io/reverse/pkg/conf"
+	"xorm.io/reverse/pkg/language"
+	"xorm.io/reverse/pkg/utils"
 
 	"gitea.com/lunny/log"
+	underscore "github.com/ahl5esoft/golang-underscore"
 	"github.com/gobwas/glob"
-	"gopkg.in/yaml.v2"
 	"xorm.io/xorm"
-	"xorm.io/xorm/names"
 	"xorm.io/xorm/schemas"
 )
 
-func reverse(rFile string) error {
-	f, err := os.Open(rFile)
-	if err != nil {
-		return err
+var (
+	defaultFuncs = template.FuncMap{
+		"UnTitle": utils.UnTitle,
+		"Upper":   utils.UpTitle,
 	}
-	defer f.Close()
-	return reverseFromReader(f)
-}
+)
 
-func reverseFromReader(rd io.Reader) error {
-	var cfg ReverseConfig
-	err := yaml.NewDecoder(rd).Decode(&cfg)
+func reverseFromConfig(rFile string) error {
+	configs, err := conf.NewReverseConfigFromYAML(rFile)
 	if err != nil {
 		return err
 	}
-	for _, target := range cfg.Targets {
-		if err := runReverse(&cfg.Source, &target); err != nil {
-			return err
+
+	for _, cfg := range configs {
+		for _, target := range cfg.Targets {
+			if err := runReverse(&cfg.Source, &target); err != nil {
+				return err
+			}
 		}
 	}
 
 	return nil
 }
 
-// ReverseSource represents a reverse source which should be a database connection
-type ReverseSource struct {
-	Database string `yaml:"database"`
-	ConnStr  string `yaml:"conn_str"`
-}
-
-// ReverseTarget represents a reverse target
-type ReverseTarget struct {
-	Type          string   `yaml:"type"`
-	IncludeTables []string `yaml:"include_tables"`
-	ExcludeTables []string `yaml:"exclude_tables"`
-	TableMapper   string   `yaml:"table_mapper"`
-	ColumnMapper  string   `yaml:"column_mapper"`
-	TemplatePath  string   `yaml:"template_path"`
-	Template      string   `yaml:"template"`
-	MultipleFiles bool     `yaml:"multiple_files"`
-	OutputDir     string   `yaml:"output_dir"`
-	TablePrefix   string   `yaml:"table_prefix"`
-	Language      string   `yaml:"language"`
-	TableName     bool     `yaml:"table_name"`
-
-	Funcs     map[string]string `yaml:"funcs"`
-	Formatter string            `yaml:"formatter"`
-	Importter string            `yaml:"importter"`
-	ExtName   string            `yaml:"ext_name"`
-}
-
-// ReverseConfig represents a reverse configuration
-type ReverseConfig struct {
-	Kind    string          `yaml:"kind"`
-	Name    string          `yaml:"name"`
-	Source  ReverseSource   `yaml:"source"`
-	Targets []ReverseTarget `yaml:"targets"`
-}
-
-var (
-	formatters   = map[string]func(string) (string, error){}
-	importters   = map[string]func([]*schemas.Table) []string{}
-	defaultFuncs = template.FuncMap{
-		"UnTitle": unTitle,
-		"Upper":   upTitle,
-	}
-)
-
-func unTitle(src string) string {
-	if src == "" {
-		return ""
-	}
-
-	if len(src) == 1 {
-		return strings.ToLower(string(src[0]))
-	}
-	return strings.ToLower(string(src[0])) + src[1:]
-}
-
-func upTitle(src string) string {
-	if src == "" {
-		return ""
-	}
-
-	return strings.ToUpper(src)
-}
-
-func filterTables(tables []*schemas.Table, target *ReverseTarget) []*schemas.Table {
+// filterTables filter by target.ExcludeTables and target.IncludeTables
+func filterTables(tables []*schemas.Table, target *conf.ReverseTarget) []*schemas.Table {
 	var res = make([]*schemas.Table, 0, len(tables))
-	for _, tb := range tables {
-		var remove bool
-		for _, exclude := range target.ExcludeTables {
-			s, _ := glob.Compile(exclude)
-			remove = s.Match(tb.Name)
-			if remove {
-				break
+	underscore.Chain(tables).
+		Filter(func(tbl schemas.Table, _ int) bool {
+			for _, exclude := range target.ExcludeTables {
+				s, _ := glob.Compile(exclude)
+				if s.Match(tbl.Name) {
+					return false
+				}
 			}
-		}
-		if remove {
-			continue
-		}
-		if len(target.IncludeTables) == 0 {
-			res = append(res, tb)
-			continue
-		}
 
-		var keep bool
-		for _, include := range target.IncludeTables {
-			s, _ := glob.Compile(include)
-			keep = s.Match(tb.Name)
-			if keep {
-				break
+			return true
+		}).
+		Filter(func(tbl schemas.Table, _ int) bool {
+			// if not set, all tables by default
+			if len(target.IncludeTables) == 0 {
+				return true
 			}
-		}
-		if keep {
-			res = append(res, tb)
-		}
-	}
+
+			for _, include := range target.IncludeTables {
+				s, _ := glob.Compile(include)
+				if s.Match(tbl.Name) {
+					return true
+				}
+			}
+
+			return false
+		}).
+		Each(func(tbl schemas.Table, _ int) {
+			res = append(res, &tbl)
+		})
+
 	return res
 }
 
-func newFuncs() template.FuncMap {
-	var m = make(template.FuncMap)
-	for k, v := range defaultFuncs {
-		m[k] = v
-	}
-	return m
-}
+func runReverse(source *conf.ReverseSource, target *conf.ReverseTarget) error {
+	var (
+		formatter func(string) (string, error)
+		importter func([]*schemas.Table) []string
+	)
 
-func convertMapper(mapname string) names.Mapper {
-	switch mapname {
-	case "gonic":
-		return names.LintGonicMapper
-	case "same":
-		return names.SameMapper{}
-	default:
-		return names.SnakeMapper{}
-	}
-}
-
-func runReverse(source *ReverseSource, target *ReverseTarget) error {
 	orm, err := xorm.NewEngine(source.Database, source.ConnStr)
 	if err != nil {
 		return err
@@ -180,9 +105,6 @@ func runReverse(source *ReverseSource, target *ReverseTarget) error {
 
 	// load configuration from language
 	lang := language.GetLanguage(target.Language, target.TableName)
-	funcs := newFuncs()
-	formatter := formatters[target.Formatter]
-	importter := importters[target.Importter]
 
 	// load template
 	var bs []byte
@@ -195,34 +117,40 @@ func runReverse(source *ReverseSource, target *ReverseTarget) error {
 		}
 	}
 
-	if lang != nil {
-		if bs == nil {
+	var tableMapper = utils.GetMapperByName(target.TableMapper)
+	var colMapper = utils.GetMapperByName(target.ColumnMapper)
+	funcs := utils.MergeFuncMap(
+		template.FuncMap(defaultFuncs),
+		template.FuncMap{
+			"TableMapper":  tableMapper.Table2Obj,
+			"ColumnMapper": colMapper.Table2Obj,
+		})
 
-			bs = []byte(lang.Template)
+	if lang != nil {
+		lang.BindTarget(target)
+
+		if bs == nil {
+			bs = []byte(lang.GetTemplate())
 		}
-		for k, v := range lang.Funcs {
-			funcs[k] = v
-		}
+
+		funcs = utils.MergeFuncMap(funcs, lang.GetFuncs())
+
 		if formatter == nil {
-			formatter = lang.Formatter
+			formatter = lang.GetFormatter()
 		}
+
 		if importter == nil {
-			importter = lang.Importter
+			importter = lang.GetImportter()
 		}
-		target.ExtName = lang.ExtName
+
+		target.ExtName = lang.GetExtName()
 	}
 	if !strings.HasPrefix(target.ExtName, ".") {
 		target.ExtName = "." + target.ExtName
 	}
 
-	var tableMapper = convertMapper(target.TableMapper)
-	var colMapper = convertMapper(target.ColumnMapper)
-
-	funcs["TableMapper"] = tableMapper.Table2Obj
-	funcs["ColumnMapper"] = colMapper.Table2Obj
-
 	if bs == nil {
-		return errors.New("You have to indicate template / template path or a language")
+		return errors.New("you have to indicate template / template path or a language")
 	}
 
 	t := template.New("reverse")

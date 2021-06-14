@@ -5,79 +5,168 @@
 package cmd
 
 import (
-	"fmt"
 	"io/ioutil"
 	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
-	"xorm.io/xorm"
 )
 
-var (
-	result = fmt.Sprintf(`package models
-
-type A struct {
-	Id int %sxorm:"integer"%s
-}
-
-func (m *A) TableName() string {
-	return "a"
-}
-
-type B struct {
-	Id int %sxorm:"INTEGER"%s
-}
-
-func (m *B) TableName() string {
-	return "b"
-}
-`, "`", "`", "`", "`")
-)
-
-func TestReverse(t *testing.T) {
-	err := reverse("../example/goxorm.yml")
+func TestReverseSimple(t *testing.T) {
+	err := reverseFromConfig("../example/simple.yml")
 	assert.NoError(t, err)
 
-	bs, err := ioutil.ReadFile("../models/models.go")
+	outputBytes, err := ioutil.ReadFile("../models/simple/models.go")
 	assert.NoError(t, err)
-	assert.EqualValues(t, result, string(bs))
+
+	// expected output
+	expectedOutputBytes, err := ioutil.ReadFile("../models/simple/simple-models.go")
+	assert.NoError(t, err)
+
+	assert.EqualValues(t, string(expectedOutputBytes), string(outputBytes))
+
+	t.Cleanup(func() {
+		if !t.Failed() {
+			os.Remove("../models/simple/models.go")
+		}
+	})
 }
 
-func TestReverse2(t *testing.T) {
-	type Outfw struct {
-		Id       int    `xorm:"not null pk autoincr"`
-		Sql      string `xorm:"default '' TEXT"`
-		Template string `xorm:"default '' TEXT"`
-		Filename string `xorm:"VARCHAR(50)"`
-	}
-
-	dir, err := ioutil.TempDir(os.TempDir(), "reverse")
+func TestReverseMultiple(t *testing.T) {
+	err := reverseFromConfig("../example/multiple.yml")
 	assert.NoError(t, err)
 
-	e, err := xorm.NewEngine("sqlite3", filepath.Join(dir, "db.db"))
+	oneOutputBytes, err := ioutil.ReadFile("../models/multiple/one/models.go")
 	assert.NoError(t, err)
 
-	assert.NoError(t, e.Sync2(new(Outfw)))
-
-	err = reverseFromReader(strings.NewReader(`
-kind: reverse
-name: mydb
-source:
-  database: sqlite3
-  conn_str: '../testdata/test.db'
-targets:
-- type: codes
-  include_tables:
-  - a
-  - b
-  exclude_tables:
-  - c
-  language: golang
-  output_dir: ../models
-`))
+	// expected output
+	expectedOneOutputBytes, err := ioutil.ReadFile("../models/multiple/one/expected-models.go")
 	assert.NoError(t, err)
+
+	assert.EqualValues(t, string(expectedOneOutputBytes), string(oneOutputBytes))
+
+	twoOutputBytes, err := ioutil.ReadFile("../models/multiple/two/models.go")
+	assert.NoError(t, err)
+
+	// expected output
+	expectedTwoOutputBytes, err := ioutil.ReadFile("../models/multiple/two/expected-models.go")
+	assert.NoError(t, err)
+
+	assert.EqualValues(t, string(expectedTwoOutputBytes), string(twoOutputBytes))
+
+	t.Cleanup(func() {
+		if !t.Failed() {
+			os.Remove("../models/multiple/one/models.go")
+			os.Remove("../models/multiple/two/models.go")
+		}
+	})
+}
+
+func TestReverseMultipleTarget(t *testing.T) {
+	err := reverseFromConfig("../example/multiple-target.yml")
+	assert.NoError(t, err)
+
+	oneOutputBytes, err := ioutil.ReadFile("../models/multiple-target/one/models.go")
+	assert.NoError(t, err)
+
+	// expected output
+	expectedOneOutputBytes, err := ioutil.ReadFile("../models/multiple-target/one/expected-models.go")
+	assert.NoError(t, err)
+
+	assert.EqualValues(t, string(expectedOneOutputBytes), string(oneOutputBytes))
+
+	twoOutputBytes, err := ioutil.ReadFile("../models/multiple-target/two/models.go")
+	assert.NoError(t, err)
+
+	// expected output
+	expectedTwoOutputBytes, err := ioutil.ReadFile("../models/multiple-target/two/expected-models.go")
+	assert.NoError(t, err)
+
+	assert.EqualValues(t, string(expectedTwoOutputBytes), string(twoOutputBytes))
+
+	t.Cleanup(func() {
+		if !t.Failed() {
+			os.Remove("../models/multiple-target/one/models.go")
+			os.Remove("../models/multiple-target/two/models.go")
+		}
+	})
+}
+
+func TestReverseIncludeExclude(t *testing.T) {
+	err := reverseFromConfig("../example/include-exclude.yml")
+	assert.NoError(t, err)
+
+	incOnlyOutputBytes, err := ioutil.ReadFile("../models/include-exclude/include-only/models.go")
+	assert.NoError(t, err)
+
+	// expected output
+	expectedIncOnlyOutputBytes, err := ioutil.ReadFile("../models/include-exclude/include-only/expected-models.go")
+	assert.NoError(t, err)
+
+	assert.EqualValues(t, string(expectedIncOnlyOutputBytes), string(incOnlyOutputBytes))
+
+	excOnlyOutputBytes, err := ioutil.ReadFile("../models/include-exclude/exclude-only/models.go")
+	assert.NoError(t, err)
+
+	// expected output
+	expectedExcOnlyOutputBytes, err := ioutil.ReadFile("../models/include-exclude/exclude-only/expected-models.go")
+	assert.NoError(t, err)
+
+	assert.EqualValues(t, string(expectedExcOnlyOutputBytes), string(excOnlyOutputBytes))
+
+	bothOutputBytes, err := ioutil.ReadFile("../models/include-exclude/both/models.go")
+	assert.NoError(t, err)
+
+	// expected output
+	expectedBothOutputBytes, err := ioutil.ReadFile("../models/include-exclude/both/expected-models.go")
+	assert.NoError(t, err)
+
+	assert.EqualValues(t, string(expectedBothOutputBytes), string(bothOutputBytes))
+
+	t.Cleanup(func() {
+		os.Remove("../models/include-exclude/include-only/models.go")
+		os.Remove("../models/include-exclude/exclude-only/models.go")
+		os.Remove("../models/include-exclude/both/models.go")
+	})
+}
+
+func TestReverseExplicitTableName(t *testing.T) {
+	err := reverseFromConfig("../example/explicit-table-name.yml")
+	assert.NoError(t, err)
+
+	outputBytes, err := ioutil.ReadFile("../models/explicit-table-name/models.go")
+	assert.NoError(t, err)
+
+	// expected output
+	expectedOutputBytes, err := ioutil.ReadFile("../models/explicit-table-name/expected-models.go")
+	assert.NoError(t, err)
+
+	assert.EqualValues(t, string(expectedOutputBytes), string(outputBytes))
+
+	t.Cleanup(func() {
+		if !t.Failed() {
+			os.Remove("../models/explicit-table-name/models.go")
+		}
+	})
+}
+
+func TestReverseExplicitColumnName(t *testing.T) {
+	err := reverseFromConfig("../example/explicit-column-name.yml")
+	assert.NoError(t, err)
+
+	outputBytes, err := ioutil.ReadFile("../models/explicit-column-name/models.go")
+	assert.NoError(t, err)
+
+	// expected output
+	expectedOutputBytes, err := ioutil.ReadFile("../models/explicit-column-name/expected-models.go")
+	assert.NoError(t, err)
+
+	assert.EqualValues(t, string(expectedOutputBytes), string(outputBytes))
+
+	t.Cleanup(func() {
+		if !t.Failed() {
+			os.Remove("../models/explicit-column-name/models.go")
+		}
+	})
 }

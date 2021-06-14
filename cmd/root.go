@@ -32,7 +32,7 @@ var (
 				return
 			}
 
-			err := reverse(reverseFile)
+			err := reverseFromConfig(reverseFile)
 			if err != nil {
 				fmt.Println(err)
 			}

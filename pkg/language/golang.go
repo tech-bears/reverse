@@ -5,39 +5,21 @@
 package language
 
 import (
-	"errors"
 	"fmt"
 	"go/format"
 	"html/template"
-	"reflect"
 	"sort"
 	"strings"
 
+	"xorm.io/reverse/pkg/conf"
 	"xorm.io/xorm/schemas"
 )
 
-// Golang represents a golang language
-var Golang = Language{
-	Name:     "golang",
-	Template: defaultGolangTemplate,
-	Types:    map[string]string{},
-	Funcs: template.FuncMap{
-		"Type": typestring,
-		"Tag":  tag,
-	},
-	Formatter: formatGo,
-	Importter: genGoImports,
-	ExtName:   ".go",
-}
-
 func init() {
-	RegisterLanguage(&Golang)
+	RegisterLanguage(NewGoLanguage())
 }
 
 var (
-	errBadComparisonType  = errors.New("invalid type for comparison")
-	errBadComparison      = errors.New("incompatible types for comparison")
-	errNoComparison       = errors.New("missing argument for comparison")
 	defaultGolangTemplate = fmt.Sprintf(`package models
 
 {{$ilen := len .Imports}}{{if gt $ilen 0}}import (
@@ -70,66 +52,59 @@ func (m *{{TableMapper .Name}}) TableName() string {
 `, "`", "`")
 )
 
-type kind int
+// Golang represents a golang language
+type GoLanguage struct {
+	target *conf.ReverseTarget
+	types  map[string]string
+}
 
-const (
-	invalidKind kind = iota
-	boolKind
-	complexKind
-	intKind
-	floatKind
-	integerKind
-	stringKind
-	uintKind
-)
-
-func basicKind(v reflect.Value) (kind, error) {
-	switch v.Kind() {
-	case reflect.Bool:
-		return boolKind, nil
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return intKind, nil
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return uintKind, nil
-	case reflect.Float32, reflect.Float64:
-		return floatKind, nil
-	case reflect.Complex64, reflect.Complex128:
-		return complexKind, nil
-	case reflect.String:
-		return stringKind, nil
+func NewGoLanguage() *GoLanguage {
+	return &GoLanguage{
+		target: nil,
+		types:  make(map[string]string),
 	}
-	return invalidKind, errBadComparisonType
 }
 
-func getCol(cols map[string]*schemas.Column, name string) *schemas.Column {
-	return cols[strings.ToLower(name)]
+func (g *GoLanguage) GetName() string {
+	return "golang"
 }
 
-func formatGo(src string) (string, error) {
-	source, err := format.Source([]byte(src))
-	if err != nil {
-		return "", err
+func (g *GoLanguage) GetTemplate() string {
+	if g.target.TableName {
+		return defaultGolangTemplateTable
 	}
-	return string(source), nil
+
+	return defaultGolangTemplate
 }
 
-func genGoImports(tables []*schemas.Table) []string {
-	imports := make(map[string]string)
-	results := make([]string, 0)
-	for _, table := range tables {
-		for _, col := range table.Columns() {
-			if typestring(col) == "time.Time" {
-				if _, ok := imports["time"]; !ok {
-					imports["time"] = "time"
-					results = append(results, "time")
-				}
-			}
-		}
+func (g *GoLanguage) GetTypes() map[string]string {
+	return g.types
+}
+
+func (g *GoLanguage) GetFuncs() template.FuncMap {
+	return template.FuncMap{
+		"Type": g.TypeString,
+		"Tag":  g.Tag,
 	}
-	return results
 }
 
-func typestring(col *schemas.Column) string {
+func (g *GoLanguage) GetFormatter() func(string) (string, error) {
+	return g.FormatGo
+}
+
+func (g *GoLanguage) GetImportter() func([]*schemas.Table) []string {
+	return g.GenGoImports
+}
+
+func (g *GoLanguage) GetExtName() string {
+	return ".go"
+}
+
+func (g *GoLanguage) BindTarget(target *conf.ReverseTarget) {
+	g.target = target
+}
+
+func (g *GoLanguage) TypeString(col *schemas.Column) string {
 	st := col.SQLType
 	t := schemas.SQLType2Type(st)
 	s := t.String()
@@ -139,9 +114,9 @@ func typestring(col *schemas.Column) string {
 	return s
 }
 
-func tag(table *schemas.Table, col *schemas.Column) template.HTML {
+func (g *GoLanguage) Tag(table *schemas.Table, col *schemas.Column) template.HTML {
 	isNameId := col.FieldName == "Id"
-	isIdPk := isNameId && typestring(col) == "int64"
+	isIdPk := isNameId && g.TypeString(col) == "int64"
 
 	var res []string
 	if !col.Nullable {
@@ -235,16 +210,35 @@ func tag(table *schemas.Table, col *schemas.Column) template.HTML {
 	}
 	res = append(res, nstr)
 	if len(res) > 0 {
+		if g.target.ColumnName {
+			return template.HTML(fmt.Sprintf(`xorm:"'%s' %s"`, col.Name, strings.Join(res, " ")))
+		}
+
 		return template.HTML(fmt.Sprintf(`xorm:"%s"`, strings.Join(res, " ")))
 	}
 	return ""
 }
 
-func include(source []string, target string) bool {
-	for _, s := range source {
-		if s == target {
-			return true
+func (g *GoLanguage) FormatGo(src string) (string, error) {
+	source, err := format.Source([]byte(src))
+	if err != nil {
+		return "", err
+	}
+	return string(source), nil
+}
+
+func (g *GoLanguage) GenGoImports(tables []*schemas.Table) []string {
+	imports := make(map[string]string)
+	results := make([]string, 0)
+	for _, table := range tables {
+		for _, col := range table.Columns() {
+			if g.TypeString(col) == "time.Time" {
+				if _, ok := imports["time"]; !ok {
+					imports["time"] = "time"
+					results = append(results, "time")
+				}
+			}
 		}
 	}
-	return false
+	return results
 }
