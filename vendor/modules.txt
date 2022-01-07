@@ -25,7 +25,7 @@ github.com/gobwas/glob/syntax/ast
 github.com/gobwas/glob/syntax/lexer
 github.com/gobwas/glob/util/runes
 github.com/gobwas/glob/util/strings
-# github.com/goccy/go-json v0.7.4
+# github.com/goccy/go-json v0.8.1
 github.com/goccy/go-json
 github.com/goccy/go-json/internal/decoder
 github.com/goccy/go-json/internal/encoder
@@ -37,11 +37,11 @@ github.com/goccy/go-json/internal/errors
 github.com/goccy/go-json/internal/runtime
 # github.com/golang-sql/civil v0.0.0-20190719163853-cb61b32ac6fe
 github.com/golang-sql/civil
-# github.com/golang/snappy v0.0.0-20180518054509-2e65f85255db
+# github.com/golang/snappy v0.0.4
 github.com/golang/snappy
 # github.com/inconshreveable/mousetrap v1.0.0
 github.com/inconshreveable/mousetrap
-# github.com/json-iterator/go v1.1.11
+# github.com/json-iterator/go v1.1.12
 github.com/json-iterator/go
 # github.com/kr/pretty v0.2.1
 ## explicit
@@ -50,12 +50,12 @@ github.com/json-iterator/go
 github.com/lib/pq
 github.com/lib/pq/oid
 github.com/lib/pq/scram
-# github.com/mattn/go-sqlite3 v1.14.8
+# github.com/mattn/go-sqlite3 v1.14.9
 ## explicit
 github.com/mattn/go-sqlite3
 # github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd
 github.com/modern-go/concurrent
-# github.com/modern-go/reflect2 v1.0.1
+# github.com/modern-go/reflect2 v1.0.2
 github.com/modern-go/reflect2
 # github.com/pmezard/go-difflib v1.0.0
 github.com/pmezard/go-difflib/difflib
@@ -87,7 +87,7 @@ golang.org/x/crypto/md4
 gopkg.in/yaml.v3
 # xorm.io/builder v0.3.9
 xorm.io/builder
-# xorm.io/xorm v1.2.3
+# xorm.io/xorm v1.2.4-0.20220107080401-cd36b112ae48
 ## explicit
 xorm.io/xorm
 xorm.io/xorm/caches

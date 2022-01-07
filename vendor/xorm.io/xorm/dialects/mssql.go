@@ -282,6 +282,12 @@ func (db *mssql) Version(ctx context.Context, queryer core.Queryer) (*schemas.Ve
 	}, nil
 }
 
+func (db *mssql) Features() *DialectFeatures {
+	return &DialectFeatures{
+		AutoincrMode: IncrAutoincrMode,
+	}
+}
+
 func (db *mssql) SQLType(c *schemas.Column) string {
 	var res string
 	switch t := c.SQLType.Name; t {
@@ -423,7 +429,7 @@ func (db *mssql) DropTableSQL(tableName string) (string, bool) {
 
 func (db *mssql) ModifyColumnSQL(tableName string, col *schemas.Column) string {
 	s, _ := ColumnString(db.dialect, col, false)
-	return fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s", tableName, s)
+	return fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s", db.quoter.Quote(tableName), s)
 }
 
 func (db *mssql) IndexCheckSQL(tableName, idxName string) (string, []interface{}) {
@@ -625,7 +631,7 @@ WHERE IXS.TYPE_DESC='NONCLUSTERED' and OBJECT_NAME(IXS.OBJECT_ID) =?
 	return indexes, nil
 }
 
-func (db *mssql) CreateTableSQL(table *schemas.Table, tableName string) ([]string, bool) {
+func (db *mssql) CreateTableSQL(ctx context.Context, queryer core.Queryer, table *schemas.Table, tableName string) (string, bool, error) {
 	if tableName == "" {
 		tableName = table.Name
 	}
@@ -656,7 +662,7 @@ func (db *mssql) CreateTableSQL(table *schemas.Table, tableName string) ([]strin
 
 	b.WriteString(")")
 
-	return []string{b.String()}, true
+	return b.String(), true, nil
 }
 
 func (db *mssql) ForUpdateSQL(query string) string {
