@@ -31,6 +31,10 @@ var (
 	}
 )
 
+func RunReverse(source *conf.ReverseSource, target *conf.ReverseTarget) error {
+	return runReverse(source, target)
+}
+
 func reverseFromConfig(rFile string) error {
 	configs, err := conf.NewReverseConfigFromYAML(rFile)
 	if err != nil {
