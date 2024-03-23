@@ -20,7 +20,7 @@ func init() {
 }
 
 var (
-	defaultGolangTemplate = fmt.Sprintf(`package models
+	defaultGolangTemplate = fmt.Sprintf(`package entity
 
 {{$ilen := len .Imports}}{{if gt $ilen 0}}import (
 	{{range .Imports}}"{{.}}"{{end}}
@@ -33,7 +33,7 @@ type {{TableMapper .Name}} struct {
 }
 {{end}}
 `, "`", "`")
-	defaultGolangTemplateTable = fmt.Sprintf(`package models
+	defaultGolangTemplateTable = fmt.Sprintf(`package entity
 
 {{$ilen := len .Imports}}{{if gt $ilen 0}}import (
 	{{range .Imports}}"{{.}}"{{end}}
