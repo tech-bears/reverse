@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"xorm.io/reverse/pkg/conf"
+	"github.com/tech-bears/reverse/pkg/conf"
 	"xorm.io/xorm/schemas"
 )
 

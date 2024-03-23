@@ -1,4 +1,4 @@
-module xorm.io/reverse
+module github.com/tech-bears/reverse
 
 go 1.16
 
